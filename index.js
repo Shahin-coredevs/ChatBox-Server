@@ -50,7 +50,8 @@ async function auth(req, res, next) {
   try {
     const token = req.headers.cookie.split('=')[1];
     const decode = jwt.verify(token, 'itsSecret');
-    const user = await userCollection.findOne({ email: decode }, { projection: { password: 0 } });
+    const user = await userCollection.findOne({ email: decode.email }, { projection: { password: 0 } });
+    // console.log('middleware =>', decode.email);
     req.user = user;
     return next()
   }
@@ -70,7 +71,7 @@ app.post('/login', async (req, res) => {
   const isValid = await userCollection.findOne({ email: email });
   if (!isValid) return res.status(404).send("User Not Found");
   if (isValid.password !== password) return res.status(401).send("User Unauthorised");
-  const token = jwt.sign({email, id: isValid._id}, 'itsSecret');
+  const token = jwt.sign({ email, id: isValid._id }, 'itsSecret');
   res.cookie('token', token, {
     httpOnly: true,
     secure: true,
@@ -88,26 +89,24 @@ app.post('/logout', (req, res) => {
   res.clearCookie('token', { maxAge: 0 }).send({ success: true })
 })
 
-// io.on('connection', (socket)=>{
-  
-//   socket.on('message',(data)=>{
-//     console.log(data);
-//     socket.to(data.receiver).emit('message', {text: data.text})
-//   })
-// })
-// var roomno = 1
 io.on('connection', (socket) => {
   console.log(`a user connected ${socket.id}`);
-  
-  
-  socket.on('message', (msg) => {
-    socket.join(msg.roomId);
-    console.log(msg, msg.roomId);
-    io.sockets.to(msg.roomId).emit('connectToRoom', msg);
+
+  socket.on('join', ({ connect, room }) => {
+    console.log(connect, room);
+    if (connect) {
+      socket.join(room)
+      return
+    }
+    socket.leave(room)
   })
-  socket.on('messageRequest', (request)=>{
-    console.log(request);
-  })
+  // socket.on('message', (msg) => {
+  //   console.log(msg, msg.roomId);
+  //   io.sockets.to(msg.roomId).emit('connectToRoom', msg);
+  // })
+  // socket.on('messageRequest', (request) => {
+  //   console.log(request);
+  // })
 });
 
 app.post('/users', async (req, res) => {
@@ -118,9 +117,11 @@ app.post('/users', async (req, res) => {
   res.status(200).send(result)
 })
 
-app.post('/conversations', async (req, res) => {
-  const { text, sender, receiver, time } = req.body
-  console.log(text, sender, receiver, time);
+app.post('/message', async (req, res) => {
+  console.log(req.body);
+  const conversationRoom = await conversationCollection.insertOne(req.body);
+  const message = await conversationCollection.findOne({ _id: conversationRoom.insertedId })
+  io.emit('message', message)
 })
 
 app.get('/users', auth, async (req, res) => {
@@ -129,9 +130,23 @@ app.get('/users', auth, async (req, res) => {
 })
 app.get('/users/:email', async (req, res) => {
   const email = req.params.email
-  const result = await userCollection.findOne({  email }, { projection: { password: 0 } })
+  const result = await userCollection.findOne({ email }, { projection: { password: 0 } })
   res.status(200).send(result)
 })
+app.get('/message', async (req, res) => {
+  const result = await conversationCollection.find().toArray();
+  res.status(200).send(result)
+})
+
+app.get('/message/:roomId', async (req, res) => {
+  const roomId = req.params.roomId
+  console.log(roomId);
+  const result = await conversationCollection.find({ 'roomId': +roomId }).toArray()
+  console.log(result);
+  return res.status(200).send(result)
+})
+
+
 
 // event rcv kore room e connect korbe eki event er maddhone disconnect kore dite hbe...
 // front end e jkn click korbe tkn event server e dibe trpr connect hobe... trpr e 2 jon eki room e connect.. room er id hobe mongodb r id..
