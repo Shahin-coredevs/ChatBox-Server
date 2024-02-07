@@ -1,12 +1,17 @@
 const express = require('express');
+const formData = require("express-form-data");
 const { MongoClient, ServerApiVersion } = require('mongodb');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const bodyParser = require('body-parser')
-const allUser = []
+const bcrypt = require('bcrypt');
+const fs = require('fs');
+const path = require('path')
+const PORT = process.env.PORT || 3000
+
 const app = express();
+
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
@@ -15,7 +20,8 @@ const io = new Server(server, {
   }
 });
 
-app.use(bodyParser.json())
+app.use(express.json())
+app.use(formData.parse())
 app.use(
   cors({
     origin: ["http://localhost:5173"],
@@ -36,14 +42,23 @@ const conversationCollection = client.db("ChatApplication").collection("Conversa
 
 async function run() {
   try {
-
-
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
 
   }
 }
 run().catch(console.dir);
+
+const fileUpload = async (file) => {
+  const imagesDir = `${path.resolve()}/images`;
+  const fileName = file.name
+  if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir);
+  const buffer = fs.readFileSync(file.path)
+  const filePath = `${imagesDir}/${fileName}`;
+  fs.writeFileSync(filePath, buffer);
+  return `images/${fileName}`
+}
+
 
 // Middleware
 async function auth(req, res, next) {
@@ -70,7 +85,8 @@ app.post('/login', async (req, res) => {
 
   const isValid = await userCollection.findOne({ email: email });
   if (!isValid) return res.status(404).send("User Not Found");
-  if (isValid.password !== password) return res.status(401).send("User Unauthorised");
+  const passwordMatch = await bcrypt.compare(password, isValid.password);
+  if (!passwordMatch) return res.status(401).send("User Unauthorised");
   const token = jwt.sign({ email, id: isValid._id }, 'itsSecret');
   res.cookie('token', token, {
     httpOnly: true,
@@ -78,10 +94,10 @@ app.post('/login', async (req, res) => {
     sameSite: 'none'
   });
   return res.status(200).send(isValid);
-  console.log(req.body);
+
 })
 app.get('/me', auth, (req, res) => {
-  console.log(req.user);
+
   return res.status(200).send(req.user);
 })
 // Log out Route 
@@ -90,38 +106,41 @@ app.post('/logout', (req, res) => {
 })
 
 io.on('connection', (socket) => {
-  console.log(`a user connected ${socket.id}`);
+  console.log(`=> Connected ${socket.id}`);
 
   socket.on('join', ({ connect, room }) => {
-    console.log(connect, room);
+
     if (connect) {
       socket.join(room)
       return
     }
     socket.leave(room)
   })
-  // socket.on('message', (msg) => {
-  //   console.log(msg, msg.roomId);
-  //   io.sockets.to(msg.roomId).emit('connectToRoom', msg);
-  // })
-  // socket.on('messageRequest', (request) => {
-  //   console.log(request);
-  // })
+  socket.on('disconnect', () => {
+    console.log('=> Disconnected', socket.id);
+  })
 });
 
 app.post('/users', async (req, res) => {
-  const user = req.body
+  const { name, email, password } = req.body
   const id = Math.floor((Math.random() * 100000))
-  const userWithId = { ...user, id }
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const userWithId = { name, email, id, password: hashedPassword }
   const result = await userCollection.insertOne(userWithId)
   res.status(200).send(result)
 })
 
 app.post('/message', async (req, res) => {
-  console.log(req.body);
-  const conversationRoom = await conversationCollection.insertOne(req.body);
-  const message = await conversationCollection.findOne({ _id: conversationRoom.insertedId })
-  io.emit('message', message)
+  // req.file ? upload 
+  // req.body.img = imagePath
+  if (req.body.data) req.body = JSON.parse(req.body.data)
+  if (req.files && req.files !== '{}') {
+    req.body.image = await fileUpload(req.files.photo)
+  }
+  const conversation = await conversationCollection.insertOne(req.body);
+  const message = await conversationCollection.findOne({ _id: conversation.insertedId })
+  io.to(message.roomId).emit('message', message)
+  res.end()
 })
 
 app.get('/users', auth, async (req, res) => {
@@ -140,11 +159,23 @@ app.get('/message', async (req, res) => {
 
 app.get('/message/:roomId', async (req, res) => {
   const roomId = req.params.roomId
-  console.log(roomId);
   const result = await conversationCollection.find({ 'roomId': +roomId }).toArray()
-  console.log(result);
   return res.status(200).send(result)
 })
+
+
+
+
+app.get('/photo/:fileName', (req, res) => {
+  const fileName = req.params.fileName;
+  const imagePath = path.join(__dirname, 'images', fileName);
+  if (fs.existsSync(imagePath)) {
+    res.sendFile(imagePath);
+  } else {
+    res.send("Not Found")
+  }
+});
+
 
 
 
@@ -152,6 +183,6 @@ app.get('/message/:roomId', async (req, res) => {
 // front end e jkn click korbe tkn event server e dibe trpr connect hobe... trpr e 2 jon eki room e connect.. room er id hobe mongodb r id..
 
 
-server.listen(3000, () => {
-  console.log('listening on *:3000');
+server.listen(PORT, () => {
+  console.log('=> Server running on',PORT);
 }); 
