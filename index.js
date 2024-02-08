@@ -131,11 +131,10 @@ app.post('/users', async (req, res) => {
 })
 
 app.post('/message', async (req, res) => {
-  // req.file ? upload 
-  // req.body.img = imagePath
   if (req.body.data) req.body = JSON.parse(req.body.data)
-  if (req.files && req.files !== '{}') {
-    req.body.image = await fileUpload(req.files.photo)
+  if (req.files.photo) {
+    console.log(req.files.photo);
+      req.body.image = await fileUpload(req.files.photo)
   }
   const conversation = await conversationCollection.insertOne(req.body);
   const message = await conversationCollection.findOne({ _id: conversation.insertedId })
@@ -164,8 +163,6 @@ app.get('/message/:roomId', async (req, res) => {
 })
 
 
-
-
 app.get('/photo/:fileName', (req, res) => {
   const fileName = req.params.fileName;
   const imagePath = path.join(__dirname, 'images', fileName);
@@ -175,12 +172,6 @@ app.get('/photo/:fileName', (req, res) => {
     res.send("Not Found")
   }
 });
-
-
-
-
-// event rcv kore room e connect korbe eki event er maddhone disconnect kore dite hbe...
-// front end e jkn click korbe tkn event server e dibe trpr connect hobe... trpr e 2 jon eki room e connect.. room er id hobe mongodb r id..
 
 
 server.listen(PORT, () => {
